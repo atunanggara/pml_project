@@ -1,0 +1,127 @@
+---
+title: "Prediction Assignment: Personal Weight Lifting Exercise"
+author: "Trunojoyo Anggara"
+date: "February 20, 2016"
+output: html_document
+---
+
+# Executive Summary
+
+Linear Discriminant Analysis (LDA) and Random Forest were used to predict which activities were being performed in the testing dataset from [Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har). 
+
+The model were built with 10-fold cross-validation resampling. The accuracy for LDA and Random Forest are ~0.85 and 0.99, respectively. Seeing the 99% accuracy in random forest model, I used this fit model to predict the 20 different test cases given by the project. 
+
+# Analysis
+
+## Reading Data 
+
+```{r cache=TRUE}
+trainingset<-'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+testset<-'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+
+if (!file.exists('pml-training.csv')) {download.file(trainingset,destfile='pml-training.csv') }
+if (!file.exists('pml-testing.csv')) {download.file(testset,destfile='pml-testing.csv')}
+training<-read.csv('pml-training.csv')
+testing<-read.csv('pml-testing.csv')
+```
+
+## Data Partition and Data Cleaning
+
+```{r, cache=TRUE}
+# Create Data Partition with 0.7 as Train1 and 0.3 as Test1
+library(caret)
+inTrain<-createDataPartition(y=training$classe, p=0.7, list=FALSE)
+Train1<-training[inTrain,]
+Test1<-training[-inTrain,]
+```
+
+Let's clean the "Train1" dataset:
+```{r, cache=TRUE}
+# There are 160 variables, but some of them have identical values 
+# and cannot be used for predictor
+# We will use nearZeroVar to identify them
+# If I want to know the details: 
+# nearZeroVar(Train1,saveMetrics = TRUE)
+DelCol<-nearZeroVar(Train1)
+Trainmod<-Train1[,-DelCol]
+dim(Trainmod)
+```
+
+This reduces the variables into 108 variables. Let's do more cleaning:
+
+```{r}
+# Delete the X: row number variable
+Trainmod<-Trainmod[-1]
+# names(Trainmod)
+
+# Some of the columns still have a lot of NAs that we can take away from the 
+# dataset. Using the technique taken from:
+# http://stackoverflow.com/questions/10574061/show-columns-with-nas-in-a-data-frame
+
+nacols <- function(df) {
+  colnames(df)[unlist(lapply(df, function(x) any(is.na(x))))]
+}
+
+ColwithNa<-nacols(Trainmod)
+# head(ColwithNa)
+# Truncate the Trainmod dataset to not include columns that have NAs 
+
+Trainmod<-Trainmod[,!(names(Trainmod) %in% ColwithNa)]
+dim(Trainmod)
+
+# Apply them to the testing data frame 
+
+# Since the last dataset that we want to predict, "testing"
+# does not have "classe", so we take the classe column away
+ColNameFinal<-colnames(Trainmod)
+NoClasse<-ColNameFinal[-58]
+
+Testmod<-Test1[ColNameFinal]
+testingmod<-testing[NoClasse]
+```
+
+## Linear Discriminant Analysis and Random Forest Algorithm
+
+Let us run the Linear Discriminant Analysis and Random Forest algorithm with 10-fold cross validation resampling method.
+```{r, cache=TRUE}
+# Linear Discriminant Analysis
+library(parallel)
+library(doParallel)
+set.seed(12345)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",
+                           number = 10,
+                           allowParallel = TRUE)
+
+fitlda <- train(classe~., method="lda",data=Trainmod,trControl = fitControl)
+
+
+# fitlda$finalModel
+predictlda<-predict(fitlda,Testmod)
+confusionMatrix(predictlda,Testmod$classe)
+
+# Random Forest algorithm
+set.seed(12345)
+registerDoParallel(cluster)
+
+fitrf <- train(classe~., method="rf",data=Trainmod,trControl = fitControl)
+stopCluster(cluster)
+
+#fitrf$finalModel
+predictrf<-predict(fitrf,Testmod)
+confusionMatrix(predictrf,Testmod$classe)
+```
+As we see above, the accuracy for LDA is ~0.85. However, the random forest algorithm is ~0.99. Since random forest method have higher accuracy, we will use the random forest fitting to predict the "testingmod"" dataset.
+
+## Out of Sample Error
+
+The out of sample error is 1-accuracy. For LDA, the error is 1-0.85 = 0.15, and for Random Forest is 1-0.99 = 0.01.
+
+## Prediction
+
+Here are the prediction:
+```{r, cache=TRUE}
+predictreal<-predict(fitrf,testingmod)
+predictreal
+```
